@@ -9,7 +9,7 @@
 #include <net/if.h> // Определяет структуру ifreq, используемую для получения информации о сетевом интерфейсе
 
 #define HOSTNAME_LEN 256 // Переменная определяющая максимальную длину имени хоста
-#define INTERFACE_NAME "eth0" // Переменная определяющая имя интерфейса
+#define MAX_INTERFACES 64 // Переменная определяющая максимальное количество интерфейсов
 
 void get_hostname(char *hostname, size_t size) { // Функция, получающая имя хоста и проверяющая успешность получения
     if (gethostname(hostname, size) != 0) {
@@ -18,46 +18,53 @@ void get_hostname(char *hostname, size_t size) { // Функция, получа
     }
 }
 
-void get_interface_ip(const char *interface, char *ip_address, size_t size) {  // Функция, получающая ip-адрес и проверяющая успешность получения
-    int fd;
-    struct ifreq ifr;
+void get_all_interfaces_IPs() { // Функция, получающая все интерфейсы системы, а так же их адреса и выводящая их
+    int sockfd;
+    struct ifconf ifc;
+    struct ifreq ifr[MAX_INTERFACES];
+    int interfaces_count;
 
-    // Создание сокета для обращения к интерфейсу:
-    fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd < 0) { // Проверка успешности создания сокета
+    // Создание сокета для получения информации об интерфейсах:
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) { // Проверка успешности создания сокета
         perror("Ошибка создания сокета"); // Вывод ошибки
         exit(EXIT_FAILURE); // Завершение программы в случае ошибки
     }
 
-    // Копирование имени интерфейса в структуру ifreq:
-    strncpy(ifr.ifr_name, interface, IFNAMSIZ - 1);
-    ifr.ifr_name[IFNAMSIZ - 1] = '\0';
+    // Инициализация структуры ifconf для работы с ioctl:
+    ifc.ifc_len = sizeof(ifr); // Размер буфера для хранения списка интерфейсов
+    ifc.ifc_req = ifr;  // Назначение переменной, в которую будет передаваться информация об интерфейсах
 
-    
-    if (ioctl(fd, SIOCGIFADDR, &ifr) < 0) { // Получение ip-адреса и проверка успешности получения
-        perror("Ошибка получения IP-адреса интерфейса"); // Вывод ошибки
-        close(fd); // Закрытие сокета для освобождения памяти
+    // Вызов ioctl для получения списка интерфейсов:
+    if (ioctl(sockfd, SIOCGIFCONF, &ifc) == -1) {  // Получение списка интерфейсов и проверка успешности получения
+        perror("Ошибка вызова ioctl SIOCGIFCONF"); // Вывод ошибки
+        close(sockfd); // Закрытие сокета для освобождения памяти
         exit(EXIT_FAILURE); // Завершение программы в случае ошибки
     }
 
-    // Извлечение адреса и его преобразование в строковый формат:
-    struct sockaddr_in *ip = (struct sockaddr_in *)&ifr.ifr_addr;
-    strncpy(ip_address, inet_ntoa(ip->sin_addr), size);
+    // Подсчёт и вывод количества интерфейсов:
+    interfaces_count = ifc.ifc_len / sizeof(struct ifreq);
+    printf("Найдено интерфейсов: %d\n", interfaces_count);
 
-    close(fd);  // Закрытие сокета для освобождения памяти
+    // Перебор и вывод интерфейсов с ip-адресами:
+    for (int i = 0; i < interfaces_count; i++) {
+        struct sockaddr_in *ip = (struct sockaddr_in *)&ifr[i].ifr_addr; // Извлечение адреса и его преобразование в строковый формат:
+        printf("Интерфейс %d: Имя: %s, IP-адрес: %s\n",
+               i + 1, ifr[i].ifr_name, inet_ntoa(ip->sin_addr));
+    }
+
+    close(sockfd); // Закрытие сокета для освобождения памяти
 }
 
 int main() {
     char hostname[HOSTNAME_LEN];
-    char ip_address[INET_ADDRSTRLEN];
 
     // Получение имени хоста и его вывод:
     get_hostname(hostname, sizeof(hostname));
     printf("Имя хоста: %s\n", hostname);
 
-    // Получение IP-адреса указанного интерфейса и его вывод:
-    get_interface_ip(INTERFACE_NAME, ip_address, sizeof(ip_address));
-    printf("IP-адрес интерфейса %s: %s\n", INTERFACE_NAME, ip_address);
+    // Вывод списка интерфейсов и их IP-адресов
+    get_all_interfaces_IPs();
 
     return 0;
 }
